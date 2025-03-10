@@ -1,12 +1,16 @@
+import argparse
 import logging
 from typing import Dict, Optional
 from datetime import datetime
-from .order_manager import OrderManager
-from .queue_manager import QueueManager
-from .solver import Solver
-from .rebalance import RebalanceManager
-from .reporting import ReportingSystem
-from .binance_api import BinanceAPI
+import sys
+import os
+from order_manager import OrderManager
+
+from queue_manager import QueueManager
+from solver import Solver
+from rebalance import RebalanceManager
+from reporting import ReportingSystem
+from binance_api import BinanceAPI
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,6 +136,128 @@ class ETFTradingSystem:
                     logger.error(f"Order execution failed: {str(e)}")
                     self.reporting.record_error(order['positionId'], str(e))
 
-if __name__ == "__main__":
+    def run_test_scenario(self, scenario_name: str):
+        """Run specific test scenarios"""
+        if scenario_name == "basic_order":
+            self._test_basic_order_flow()
+        elif scenario_name == "rate_limit":
+            self._test_rate_limit()
+        elif scenario_name == "rebalance":
+            self._test_rebalance()
+        elif scenario_name == "large_order":
+            self._test_large_order()
+        else:
+            logger.error(f"Unknown scenario: {scenario_name}")
+
+    def _test_basic_order_flow(self):
+        """Test basic buy/sell order flow"""
+        logger.info("Testing basic order flow...")
+        
+        # Sample buy order
+        buy_order = {
+            "timestamp": 0,
+            "action": "buy",
+            "positionId": 1,
+            "indexId": 1,
+            "quantity": 100,
+            "indexPrice": 1000,
+            "assets": [
+                {"assetId": "A", "quantity": 1, "price": 10},
+                {"assetId": "B", "quantity": 2, "price": 5},
+                {"assetId": "C", "quantity": 5, "price": 2}
+            ]
+        }
+        
+        result = self.submit_order(buy_order)
+        logger.info(f"Buy order result: {result}")
+        
+        # Check fill report
+        fill_report = self.get_fill_report(1)
+        logger.info(f"Fill report: {fill_report}")
+
+    def _test_rate_limit(self):
+        """Test rate limit handling"""
+        logger.info("Testing rate limit handling...")
+        
+        # Submit multiple orders rapidly
+        for i in range(120):  # More than rate limit
+            order = {
+                "timestamp": 0,
+                "action": "buy",
+                "positionId": i,
+                "indexId": 1,
+                "quantity": 100,
+                "indexPrice": 1000
+            }
+            result = self.submit_order(order)
+            logger.info(f"Order {i} result: {result}")
+
+    def _test_rebalance(self):
+        """Test rebalancing functionality"""
+        logger.info("Testing rebalance...")
+        
+        index_data = {
+            "indexId": 1,
+            "assets": [
+                {"assetId": "A", "quantity": 1, "price_initial": 10, "price_current": 20},
+                {"assetId": "B", "quantity": 2, "price_initial": 5, "price_current": 5},
+                {"assetId": "C", "quantity": 5, "price_initial": 2, "price_current": 2}
+            ]
+        }
+        
+        result = self.rebalance_manager.execute_rebalance(1, index_data)
+        logger.info(f"Rebalance result: {result}")
+
+    def _test_large_order(self):
+        """Test large order handling"""
+        logger.info("Testing large order handling...")
+        
+        large_order = {
+            "timestamp": 0,
+            "action": "buy",
+            "positionId": 1,
+            "indexId": 1,
+            "quantity": 1000000,
+            "indexPrice": 30,
+            "assets": [
+                {"assetId": "A", "quantity": 1, "price": 10},
+                {"assetId": "B", "quantity": 2, "price": 5},
+                {"assetId": "C", "quantity": 5, "price": 2}
+            ]
+        }
+        
+        result = self.submit_order(large_order)
+        logger.info(f"Large order result: {result}")
+
+def main():
+    parser = argparse.ArgumentParser(description='ETF Trading System')
+    parser.add_argument('--scenario', type=str, help='Test scenario to run')
+    parser.add_argument('--action', type=str, help='Action to perform (buy/sell/cancel)')
+    parser.add_argument('--position-id', type=int, help='Position ID')
+    parser.add_argument('--index-id', type=int, help='Index ID')
+    parser.add_argument('--quantity', type=float, help='Order quantity')
+    parser.add_argument('--price', type=float, help='Order price')
+    
+    args = parser.parse_args()
+    
     system = ETFTradingSystem()
-    # Add any initialization or test code here 
+    
+    if args.scenario:
+        system.run_test_scenario(args.scenario)
+    elif args.action:
+        if args.action == 'buy':
+            order = {
+                "action": "buy",
+                "positionId": args.position_id,
+                "indexId": args.index_id,
+                "quantity": args.quantity,
+                "indexPrice": args.price
+            }
+            result = system.submit_order(order)
+            print(f"Order result: {result}")
+        elif args.action == 'cancel':
+            result = system.cancel_order(args.position_id)
+            print(f"Cancel result: {result}")
+
+if __name__ == "__main__":
+    main() 

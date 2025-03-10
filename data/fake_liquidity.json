@@ -1,0 +1,20 @@
+{
+  "BTC": {
+    "orderbook": [
+      {"price": 5000, "quantity": 1.0, "side": "ask"},
+      {"price": 5001, "quantity": 2.0, "side": "ask"},
+      {"price": 4999, "quantity": 1.5, "side": "bid"}
+    ],
+    "max_order_size": 5.0,
+    "min_order_size": 0.001
+  },
+  "ETH": {
+    "orderbook": [
+      {"price": 2500, "quantity": 20.0, "side": "ask"},
+      {"price": 2501, "quantity": 30.0, "side": "ask"},
+      {"price": 2499, "quantity": 25.0, "side": "bid"}
+    ],
+    "max_order_size": 100.0,
+    "min_order_size": 0.01
+  }
+} 

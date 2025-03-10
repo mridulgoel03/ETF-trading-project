@@ -8,7 +8,6 @@ class OrderBook:
     def add_order(self, order: dict) -> bool:
         """
         Adds an order to the order book.
-        ###Also updates the index_orders dictionary. 
         Returns True if successful, False if failed.
         """
         position_id = order.get('positionId')

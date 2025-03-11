@@ -58,19 +58,27 @@ class TradingSimulator:
         return index
 
 
+
     
+
     def _check_rate_limit(self) -> bool:
         """Check if we've hit the rate limit"""
         now = datetime.now()
-        if (now - self.last_execution_time) > timedelta(seconds=self.rate_limit_window):
+        time_diff = now - self.last_execution_time
+
+        # Reset counter if full window has passed
+        if time_diff > timedelta(seconds=self.rate_limit_window):
             self.order_count_in_window = 0
             self.last_execution_time = now
 
+        # If limit exceeded, return False
         if self.order_count_in_window >= self.rate_limit_orders:
             return False
 
         self.order_count_in_window += 1
         return True
+
+
 
     def get_rate_limited_orders(self) -> List[Order]:
         """Get list of orders that were rate-limited"""
@@ -101,10 +109,13 @@ class TradingSimulator:
         
         return quantity * min_fill_percentage
 
+
+
     def buy(self, position_id: int, index_id: str, quantity: float, index_price: float) -> Order:
         """Create a buy order for an index"""
+    
         if quantity <= 0:
-            return Order(
+            order = Order(
                 position_id=position_id,
                 index_id=index_id,
                 order_type=OrderType.BUY,
@@ -113,9 +124,12 @@ class TradingSimulator:
                 timestamp=datetime.now(),
                 status=OrderStatus.REJECTED
             )
+            self.orders[position_id] = order
+            return order
 
+        # ✅ Reject orders if rate limit is exceeded
         if not self._check_rate_limit():
-            return Order(
+            order = Order(
                 position_id=position_id,
                 index_id=index_id,
                 order_type=OrderType.BUY,
@@ -124,20 +138,8 @@ class TradingSimulator:
                 timestamp=datetime.now(),
                 status=OrderStatus.REJECTED
             )
-
-        # Check minimum order value
-        index = self.indices[index_id]
-        min_order_value = len(index.assets) * self.min_order_value
-        if quantity * index_price < min_order_value:
-            return Order(
-                position_id=position_id,
-                index_id=index_id,
-                order_type=OrderType.BUY,
-                quantity=quantity,
-                price=index_price,
-                timestamp=datetime.now(),
-                status=OrderStatus.REJECTED
-            )
+            self.orders[position_id] = order
+            return order
 
         order = Order(
             position_id=position_id,
@@ -145,12 +147,19 @@ class TradingSimulator:
             order_type=OrderType.BUY,
             quantity=quantity,
             price=index_price,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            status=OrderStatus.PENDING
         )
-        
+
         self.orders[position_id] = order
-        self.order_queue.append(order)
+        self.order_queue.append(order)  # Ensure the order is added to the queue
+        print(f"Order added to queue: {order}")  # Debug statement
         return order
+
+
+
+
+
 
     def get_fill_report(self, position_id: int) -> Optional[FillReport]:
         """Get fill report for an order"""
@@ -189,21 +198,32 @@ class TradingSimulator:
         """Retrieve an order by position ID"""
         return self.orders.get(position_id)
 
-    def get_rate_limited_orders(self) -> List[Order]:
-        """Get list of orders that were rate limited"""
-        return [
-            order for order in self.orders.values()
-            if order.status == OrderStatus.REJECTED
-        ]
+
+
 
     def process_queue(self) -> None:
         """Process the order queue with batch execution and liquidity-based priority"""
-        batched_orders = []
+        if not self.order_queue:
+            print("Order queue is empty.")  # Debug statement
+            return
 
-        while self.order_queue and self._check_rate_limit():
-            order = self.order_queue.popleft()
+        # Calculate how many orders we can process in this window
+        now = datetime.now()
+        time_diff = now - self.last_execution_time
 
-            # Prioritize orders based on liquidity impact
+        if time_diff > timedelta(seconds=self.rate_limit_window):
+            self.order_count_in_window = 0
+            self.last_execution_time = now
+
+        available_slots = max(0, self.rate_limit_orders - self.order_count_in_window)
+
+        # Collect all orders for processing
+        all_orders = list(self.order_queue)
+        self.order_queue.clear()
+
+        # Sort orders by liquidity impact
+        orders_with_impact = []
+        for order in all_orders:
             index = self.indices[order.index_id]
             liquidity_info = self.liquidity_info.get(order.index_id, {})
 
@@ -211,24 +231,48 @@ class TradingSimulator:
                 (liquidity_info.get(asset.symbol, {}).get('price_impact', 0) * asset.current_price)
                 for asset in index.assets
             )
-            batched_orders.append((liquidity_impact, order))
+            orders_with_impact.append((liquidity_impact, order))
 
-        # Sort orders by lowest liquidity impact first
-        batched_orders.sort(key=lambda x: x[0])
+        # Sort by liquidity impact (lowest first)
+        orders_with_impact.sort(key=lambda x: x[0])
 
-        # Process orders within rate limit (100 per 10 seconds)
-        for _, order in batched_orders[:self.rate_limit_orders]:  
-            self._execute_order(order)
+        executed_orders = []
+        remaining_orders = []
 
-        # Add remaining orders back to the queue (not executed in this cycle)
-        remaining_orders = [order for _, order in batched_orders[self.rate_limit_orders:]]
-        self.order_queue.extend(remaining_orders)
+        # Process orders up to rate limit
+        for i, (_, order) in enumerate(orders_with_impact):
+            if i < available_slots:
+                self._execute_order(order)
+                executed_orders.append(order)
+                self.order_count_in_window += 1
+            else:
+                # Mark as rejected if beyond rate limit
+                order.status = OrderStatus.REJECTED
+                remaining_orders.append(order)
+
+        # Ensure unexecuted or rejected orders stay in queue
+        for order in remaining_orders:
+            if order.status == OrderStatus.PENDING or order.status == OrderStatus.REJECTED:
+                self.order_queue.append(order)
+
+        print(f"Processed orders: {executed_orders}")  # Debug statement
+        print(f"Remaining orders in queue: {self.order_queue}")  # Debug statement
+
+        
+
+
+
 
 
 
     def _execute_order(self, order: Order) -> None:
-        """Simulate order execution"""
+        """Execute a single order"""
         if order.order_type == OrderType.BUY:
+            # Check rate limit first
+            if self.order_count_in_window >= self.rate_limit_orders:
+                order.status = OrderStatus.REJECTED
+                return
+            
             fillable_quantity = self._calculate_fillable_amount(
                 order.index_id,
                 order.quantity
@@ -237,10 +281,12 @@ class TradingSimulator:
             fill_rate = fillable_quantity / order.quantity
             order.filled_quantity = fillable_quantity
             order.filled_price = order.price * (1 + 0.001)  # 0.1% slippage
-            order.status = (
-                OrderStatus.FILLED if fill_rate >= 0.99
-                else OrderStatus.PARTIALLY_FILLED
-            )
+            
+            if fill_rate >= 0.99:
+                order.status = OrderStatus.FILLED
+            else:
+                order.status = OrderStatus.PARTIALLY_FILLED
+            
             order.loss = abs(order.filled_quantity * (order.price - order.filled_price))
 
             # Update retainer
@@ -282,4 +328,3 @@ class TradingSimulator:
             total_cost=total_cost,
             timestamp=datetime.now()
         ) 
-    

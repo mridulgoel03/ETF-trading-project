@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import deque
-from .models import (
+from src.etf_trading.models import (
     Order, Index, Asset, OrderType, OrderStatus,
     CancelResult, FillReport, RebalanceReport
 )

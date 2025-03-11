@@ -1,6 +1,12 @@
 import json
 import pytest
 from datetime import datetime, timedelta
+import sys
+import os
+
+# Add the project root directory to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from src.etf_trading.models import Order, Index, OrderType, OrderStatus
 from src.etf_trading.simulator import TradingSimulator
 

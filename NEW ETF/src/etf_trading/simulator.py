@@ -16,13 +16,33 @@ class TradingSimulator:
         self.min_order_value = 5.0  # minimum $5 per asset
         self.last_execution_time = datetime.now()
         self.order_count_in_window = 0
+        self.liquidity_info: Dict[str, Dict[str, Dict]] = {}
+        self.retainer: Dict[str, float] = {}
 
-    def create_index(self, index_id: str, assets: List[Tuple[str, float, float]]) -> Index:
+    def set_liquidity_info(self, index_id: str, liquidity_info: Dict[str, Dict]):
+        """Set liquidity constraints for an index's assets"""
+        self.liquidity_info[index_id] = liquidity_info
+
+    def update_prices(self, index_id: str, prices: Dict[str, float]):
+        """Update current prices for assets in an index"""
+        if index_id not in self.indices:
+            raise ValueError("Index not found")
+        
+        index = self.indices[index_id]
+        for asset in index.assets:
+            if asset.symbol in prices:
+                asset.current_price = prices[asset.symbol]
+
+    def get_index(self, index_id: str) -> Optional[Index]:
+        """Get index by ID"""
+        return self.indices.get(index_id)
+
+    def create_index(self, index_id: str, assets: List[Tuple[str, float, float, float]]) -> Index:
         """Create a new index with initial assets"""
         now = datetime.now()
         index_assets = [
-            Asset(symbol=symbol, quantity=qty, price_last_rebalance=price, current_price=price)
-            for symbol, qty, price in assets
+            Asset(symbol=symbol, quantity=qty, price_last_rebalance=p0, current_price=p)
+            for symbol, qty, p0, p in assets
         ]
         index = Index(
             id=index_id,
@@ -31,6 +51,7 @@ class TradingSimulator:
             creation_time=now
         )
         self.indices[index_id] = index
+        self.retainer[index_id] = 0.0
         return index
 
     def _check_rate_limit(self) -> bool:
@@ -45,6 +66,28 @@ class TradingSimulator:
         
         self.order_count_in_window += 1
         return True
+
+    def _calculate_fillable_amount(self, index_id: str, quantity: float) -> float:
+        """Calculate fillable amount based on liquidity constraints"""
+        if index_id not in self.liquidity_info:
+            return quantity
+
+        index = self.indices[index_id]
+        liquidity_info = self.liquidity_info[index_id]
+        
+        # Find the most constraining asset
+        min_fill_percentage = 1.0
+        for asset in index.assets:
+            if asset.symbol not in liquidity_info:
+                continue
+                
+            asset_info = liquidity_info[asset.symbol]
+            asset_notional = quantity * asset.current_price * asset.quantity
+            if asset_notional > asset_info['max_fillable']:
+                fill_percentage = asset_info['max_fillable'] / asset_notional
+                min_fill_percentage = min(min_fill_percentage, fill_percentage)
+        
+        return quantity * min_fill_percentage
 
     def buy(self, position_id: int, index_id: str, quantity: float, index_price: float) -> Order:
         """Create a buy order for an index"""
@@ -70,6 +113,20 @@ class TradingSimulator:
                 status=OrderStatus.REJECTED
             )
 
+        # Check minimum order value
+        index = self.indices[index_id]
+        min_order_value = len(index.assets) * self.min_order_value
+        if quantity * index_price < min_order_value:
+            return Order(
+                position_id=position_id,
+                index_id=index_id,
+                order_type=OrderType.BUY,
+                quantity=quantity,
+                price=index_price,
+                timestamp=datetime.now(),
+                status=OrderStatus.REJECTED
+            )
+
         order = Order(
             position_id=position_id,
             index_id=index_id,
@@ -82,6 +139,19 @@ class TradingSimulator:
         self.orders[position_id] = order
         self.order_queue.append(order)
         return order
+
+    def get_fill_report(self, position_id: int) -> Optional[FillReport]:
+        """Get fill report for an order"""
+        order = self.orders.get(position_id)
+        if not order:
+            return None
+            
+        return FillReport(
+            position_id=position_id,
+            fill_percentage=(order.filled_quantity / order.quantity * 100),
+            loss=order.loss,
+            timestamp=datetime.now()
+        )
 
     def cancel(self, position_id: int) -> CancelResult:
         """Cancel an existing order"""
@@ -123,15 +193,26 @@ class TradingSimulator:
     def _execute_order(self, order: Order) -> None:
         """Simulate order execution"""
         if order.order_type == OrderType.BUY:
-            # Simulate partial fills and slippage
-            fill_rate = min(1.0, 0.8 + (0.2 * (1000 / order.quantity)))  # Larger orders get worse fills
-            order.filled_quantity = order.quantity * fill_rate
+            fillable_quantity = self._calculate_fillable_amount(
+                order.index_id,
+                order.quantity
+            )
+            
+            fill_rate = fillable_quantity / order.quantity
+            order.filled_quantity = fillable_quantity
             order.filled_price = order.price * (1 + 0.001)  # 0.1% slippage
             order.status = (
-                OrderStatus.FILLED if fill_rate == 1.0
+                OrderStatus.FILLED if fill_rate >= 0.99
                 else OrderStatus.PARTIALLY_FILLED
             )
             order.loss = abs(order.filled_quantity * (order.price - order.filled_price))
+
+            # Update retainer
+            index = self.indices[order.index_id]
+            filled_value = order.filled_quantity * order.filled_price
+            self.retainer[order.index_id] += (
+                order.quantity * order.price - filled_value
+            )
 
     def rebalance(self, index_id: str, new_weights: Dict[str, float]) -> RebalanceReport:
         """Rebalance an index to new weights"""

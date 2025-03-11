@@ -39,7 +39,7 @@ class Index:
         """Calculate the cost of rebalancing to new weights"""
         current_nav = self.calculate_nav()
         total_cost = 0.0
-        
+                                  
         for asset in self.assets:
             new_weight = new_weights.get(asset.symbol, 0)
             target_value = current_nav * new_weight

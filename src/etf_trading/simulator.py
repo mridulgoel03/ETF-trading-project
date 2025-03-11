@@ -57,10 +57,6 @@ class TradingSimulator:
         self.retainer[index_id] = 0.0
         return index
 
-
-
-    
-
     def _check_rate_limit(self) -> bool:
         """Check if we've hit the rate limit"""
         now = datetime.now()
@@ -77,8 +73,6 @@ class TradingSimulator:
 
         self.order_count_in_window += 1
         return True
-
-
 
     def get_rate_limited_orders(self) -> List[Order]:
         """Get list of orders that were rate-limited"""
@@ -108,8 +102,6 @@ class TradingSimulator:
                 min_fill_percentage = min(min_fill_percentage, fill_percentage)
         
         return quantity * min_fill_percentage
-
-
 
     def buy(self, position_id: int, index_id: str, quantity: float, index_price: float) -> Order:
         """Create a buy order for an index"""
@@ -156,11 +148,6 @@ class TradingSimulator:
         print(f"Order added to queue: {order}")  # Debug statement
         return order
 
-
-
-
-
-
     def get_fill_report(self, position_id: int) -> Optional[FillReport]:
         """Get fill report for an order"""
         order = self.orders.get(position_id)
@@ -197,9 +184,6 @@ class TradingSimulator:
     def get_order(self, position_id: int) -> Optional[Order]:
         """Retrieve an order by position ID"""
         return self.orders.get(position_id)
-
-
-
 
     def process_queue(self) -> None:
         """Process the order queue with batch execution and liquidity-based priority"""
@@ -247,7 +231,7 @@ class TradingSimulator:
                 self.order_count_in_window += 1
             else:
                 # Mark as rejected if beyond rate limit
-                order.status = OrderStatus.REJECTED
+                order.status = OrderStatus.PENDING
                 remaining_orders.append(order)
 
         # Ensure unexecuted or rejected orders stay in queue
@@ -257,13 +241,6 @@ class TradingSimulator:
 
         print(f"Processed orders: {executed_orders}")  # Debug statement
         print(f"Remaining orders in queue: {self.order_queue}")  # Debug statement
-
-        
-
-
-
-
-
 
     def _execute_order(self, order: Order) -> None:
         """Execute a single order"""
@@ -296,7 +273,6 @@ class TradingSimulator:
                 order.quantity * order.price - filled_value
             )
 
-    
     def rebalance(self, index_id: str, new_weights: Dict[str, float]) -> RebalanceReport:
         """Rebalance an index to new weights"""
         if index_id not in self.indices:

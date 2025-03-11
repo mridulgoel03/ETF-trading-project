@@ -1,0 +1,177 @@
+{
+  "basic_scenarios": [
+    {
+      "description": "Basic order flow with sequential operations",
+      "initial_index": {
+        "id": "INDEX_0",
+        "price": 1000,
+        "assets": [
+          ["A", 1, 10, 10],
+          ["B", 2, 5, 5],
+          ["C", 5, 2, 2]
+        ]
+      },
+      "timeline": [
+        {
+          "timestamp": 0,
+          "action": "buy",
+          "params": {
+            "position_id": 1,
+            "index_id": "INDEX_0",
+            "quantity": 2,
+            "index_price": 30
+          },
+          "expected_status": "PENDING"
+        },
+        {
+          "timestamp": 1,
+          "action": "buy",
+          "params": {
+            "position_id": 2,
+            "index_id": "INDEX_0",
+            "quantity": 9,
+            "index_price": 30
+          },
+          "expected_status": "PENDING"
+        },
+        {
+          "timestamp": 1,
+          "action": "cancel",
+          "params": {
+            "position_id": 1
+          },
+          "expected_status": "CANCELLED"
+        }
+      ]
+    }
+  ],
+  "liquidity_scenarios": [
+    {
+      "description": "Large order with limited liquidity",
+      "initial_index": {
+        "id": "INDEX_1",
+        "price": 1000,
+        "assets": [
+          ["A", 1, 10, 11],
+          ["B", 2, 5, 5],
+          ["C", 5, 2, 2]
+        ],
+        "liquidity_info": {
+          "A": {"max_fillable": 2000000, "price_impact": 0.001},
+          "B": {"max_fillable": 1000000, "price_impact": 0.002},
+          "C": {"max_fillable": 200000, "price_impact": 0.005}
+        }
+      },
+      "timeline": [
+        {
+          "timestamp": -1,
+          "index_nav": 31
+        },
+        {
+          "timestamp": 0,
+          "index_nav": 30,
+          "action": "buy",
+          "params": {
+            "position_id": 1,
+            "index_id": "INDEX_1",
+            "quantity": 300000,
+            "index_price": 30
+          },
+          "expected_status": "PENDING"
+        },
+
+        {
+          "timestamp": 1,
+          "index_nav": 24.5,
+          "asset_prices": {
+            "A": 9,
+            "B": 4,
+            "C": 1.5
+          },
+          "expected_fill_percentage": 20,
+          "expected_partial_fill": true
+        }
+      ]
+    }
+  ],
+  "rebalance_scenarios": [
+    {
+      "description": "Monthly rebalance with asset changes",
+      "initial_index": {
+        "id": "INDEX_2",
+        "price": 1000,
+        "assets": [
+          ["A", 1, 10, 10],
+          ["B", 2, 5, 5],
+          ["C", 5, 2, 2]
+        ]
+      },
+      "timeline": [
+        {
+          "timestamp": 0,
+          "index_nav": 30
+        },
+        {
+          "timestamp": 1,
+          "index_nav": 40,
+          "asset_prices": {
+            "A": 20,
+            "B": 5,
+            "C": 2
+          }
+        },
+        {
+          "timestamp": 2,
+          "action": "rebalance",
+          "params": {
+            "index_id": "INDEX_2",
+            "new_weights": {
+              "A": 0.25,
+              "B": 0.5,
+              "D": 0.25
+            }
+          },
+          "expected_nav": 40
+        }
+      ]
+    }
+  ],
+  "batch_processing_scenarios": [
+    {
+      "description": "Multiple index orders with rate limiting",
+      "indices": [
+        {
+          "id": "INDEX_i",
+          "assets": ["A", "B", "C"]
+        },
+        {
+          "id": "INDEX_j",
+          "assets": ["C", "D", "E"]
+        }
+      ],
+      "timeline": [
+        {
+          "timestamp": 0,
+          "orders": [
+            {
+              "index_id": "INDEX_i",
+              "amount": 100000,
+              "price": 100
+            },
+            {
+              "index_id": "INDEX_i",
+              "amount": 200000,
+              "price": 99.9
+            },
+            {
+              "index_id": "INDEX_j",
+              "amount": 100000,
+              "price": 200
+            }
+          ],
+          "expected_queue": ["INDEX_i"]
+        }
+      ]
+    }
+  ]
+} 

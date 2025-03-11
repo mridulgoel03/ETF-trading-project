@@ -1,4 +1,86 @@
+
 {
+  "edge_cases_scenarios": [
+  {
+    "description": "High-frequency trading test with rate limit",
+    "initial_index": {
+      "id": "INDEX_HFT",
+      "price": 1000,
+      "assets": [
+        ["A", 1, 10, 10],
+        ["B", 2, 5, 5]
+      ]
+    },
+    "timeline": [
+      {
+        "timestamp": 0,
+        "action": "buy",
+        "params": {
+          "position_id": 1,
+          "index_id": "INDEX_HFT",
+          "quantity": 1,
+          "index_price": 30
+        },
+        "expected_status": "PENDING"
+      },
+      {
+        "timestamp": 0,
+        "action": "buy",
+        "params": {
+          "position_id": 2,
+          "index_id": "INDEX_HFT",
+          "quantity": 1,
+          "index_price": 30
+        },
+        "expected_status": "PENDING"
+      },
+      {
+        "timestamp": 0,
+        "repeat": 98,
+        "action": "buy",
+        "params": {
+          "position_id": "AUTO_INCREMENT",
+          "index_id": "INDEX_HFT",
+          "quantity": 1,
+          "index_price": 30
+        },
+        "expected_status": "PENDING"
+      }
+    ]
+  },
+  {
+    "description": "Large buy order impacting market price",
+    "initial_index": {
+      "id": "INDEX_LARGE",
+      "price": 1000,
+      "assets": [
+        ["A", 1, 10, 10],
+        ["B", 2, 5, 5]
+      ]
+    },
+    "timeline": [
+      {
+        "timestamp": 0,
+        "action": "buy",
+        "params": {
+          "position_id": 1,
+          "index_id": "INDEX_LARGE",
+          "quantity": 1000000,
+          "index_price": 30
+        },
+        "expected_status": "PENDING"
+      },
+      {
+        "timestamp": 1,
+        "asset_prices": {
+          "A": 15,
+          "B": 8
+        }
+      }
+    ]
+  }
+],
+
   "basic_scenarios": [
     {
       "description": "Basic order flow with sequential operations",
@@ -9,7 +91,7 @@
           ["A", 1, 10, 10],
           ["B", 2, 5, 5],
           ["C", 5, 2, 2]
-        ]
+        ]                 
       },
       "timeline": [
         {
@@ -45,7 +127,7 @@
       ]
     }
   ],
-  "liquidity_scenarios": [
+  "liquidity_scenarios": [   
     {
       "description": "Large order with limited liquidity",
       "initial_index": {
@@ -100,7 +182,7 @@
       "initial_index": {
         "id": "INDEX_2",
         "price": 1000,
-        "assets": [
+        "assets": [        
           ["A", 1, 10, 10],
           ["B", 2, 5, 5],
           ["C", 5, 2, 2]

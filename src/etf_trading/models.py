@@ -5,9 +5,9 @@ from typing import List, Tuple, Dict, Optional
 
 class OrderType(Enum):
     BUY = "BUY"
-    SELL = "SELL"
+    SELL = "SELL"    
     CANCEL = "CANCEL"
-    REBALANCE = "REBALANCE"
+    REBALANCE = "REBALANCE" 
 
 class OrderStatus(Enum):
     PENDING = "PENDING"
@@ -26,7 +26,7 @@ class Asset:
 
 @dataclass
 class Index:
-    id: str
+    id: str 
     assets: List[Asset]
     last_rebalance_time: datetime
     creation_time: datetime

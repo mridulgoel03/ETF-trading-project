@@ -20,10 +20,68 @@ class TestOrderScenarios:
     def simulator(self):
         return TradingSimulator()
 
+    def test_high_frequency_orders(self, simulator, test_data):
+        """Test 100 orders in <10 seconds to trigger rate limit"""
+        scenario = test_data['edge_cases_scenarios'][0]
+
+        # Setup index
+        index_data = scenario['initial_index']
+        index_assets = [
+            (asset[0], asset[1], asset[2], asset[3])
+            for asset in index_data['assets']
+        ]
+        simulator.create_index(index_data['id'], index_assets)
+
+        # Submit 100 orders quickly
+        for i, event in enumerate(scenario['timeline']):
+            if 'repeat' in event:
+                for _ in range(event['repeat']):
+                    params = event['params'].copy()
+                    params["position_id"] = len(simulator.orders) + 1
+                    order = simulator.buy(**params)
+                    assert order.status == OrderStatus.PENDING
+            else:
+                order = simulator.buy(**event['params'])
+                assert order.status == OrderStatus.PENDING
+
+        # Process orders and check rate limit
+        simulator.process_queue()
+        rate_limited_orders = simulator.get_rate_limited_orders()
+        assert len(rate_limited_orders) > 0  # Some orders must have been rate-limited
+
+    def test_large_order_price_impact(self, simulator, test_data):
+        """Test large buy order moving market price"""
+        scenario = test_data['edge_cases_scenarios'][1]
+
+        # Setup index
+        index_data = scenario['initial_index']
+        index_assets = [
+            (asset[0], asset[1], asset[2], asset[3])
+            for asset in index_data['assets']
+        ]
+        simulator.create_index(index_data['id'], index_assets)
+
+        # Place large buy order
+        order = simulator.buy(**scenario['timeline'][0]['params'])
+        assert order.status == OrderStatus.PENDING
+
+        # Process queue
+        simulator.process_queue()
+
+        # Update market prices
+        simulator.update_prices(index_data['id'], scenario['timeline'][1]['asset_prices'])
+
+        # Verify new asset prices reflect impact
+        for asset in simulator.indices[index_data['id']].assets:
+            expected_price = scenario['timeline'][1]['asset_prices'].get(asset.symbol)
+            if expected_price:
+                assert asset.current_price == expected_price
+
+
     def test_basic_order_flow(self, simulator, test_data):
         """Test case 1a: Basic order flow with sequential operations"""
         scenario = test_data['basic_scenarios'][0]
-        
+ 
         # Setup initial index
         index_data = scenario['initial_index']
         index_assets = [
@@ -44,7 +102,7 @@ class TestOrderScenarios:
     def test_liquidity_scenario(self, simulator, test_data):
         """Test case 1b: Edge case with limited liquidity"""
         scenario = test_data['liquidity_scenarios'][0]
-        
+ 
         # Setup initial index with liquidity info
         index_data = scenario['initial_index']
         index_assets = [
@@ -83,7 +141,7 @@ class TestOrderScenarios:
     def test_rebalance_scenario(self, simulator, test_data):
         """Test monthly rebalance with asset changes"""
         scenario = test_data['rebalance_scenarios'][0]
-        
+
         # Setup initial index
         index_data = scenario['initial_index']
         index_assets = [

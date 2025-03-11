@@ -1,10 +1,14 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import deque
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.etf_trading.models import (
     Order, Index, Asset, OrderType, OrderStatus,
     CancelResult, FillReport, RebalanceReport
-)
+)   
 
 class TradingSimulator:
     def __init__(self):
@@ -27,7 +31,7 @@ class TradingSimulator:
         """Update current prices for assets in an index"""
         if index_id not in self.indices:
             raise ValueError("Index not found")
-        
+
         index = self.indices[index_id]
         for asset in index.assets:
             if asset.symbol in prices:
@@ -36,7 +40,6 @@ class TradingSimulator:
     def get_index(self, index_id: str) -> Optional[Index]:
         """Get index by ID"""
         return self.indices.get(index_id)
-
     def create_index(self, index_id: str, assets: List[Tuple[str, float, float, float]]) -> Index:
         """Create a new index with initial assets"""
         now = datetime.now()
@@ -54,18 +57,27 @@ class TradingSimulator:
         self.retainer[index_id] = 0.0
         return index
 
+
+    
     def _check_rate_limit(self) -> bool:
         """Check if we've hit the rate limit"""
         now = datetime.now()
         if (now - self.last_execution_time) > timedelta(seconds=self.rate_limit_window):
             self.order_count_in_window = 0
             self.last_execution_time = now
-        
+
         if self.order_count_in_window >= self.rate_limit_orders:
             return False
-        
+
         self.order_count_in_window += 1
         return True
+
+    def get_rate_limited_orders(self) -> List[Order]:
+        """Get list of orders that were rate-limited"""
+        return [
+            order for order in self.orders.values()
+            if order.status == OrderStatus.REJECTED  # Ensure rejected orders are tracked
+        ]
 
     def _calculate_fillable_amount(self, index_id: str, quantity: float) -> float:
         """Calculate fillable amount based on liquidity constraints"""
@@ -185,10 +197,34 @@ class TradingSimulator:
         ]
 
     def process_queue(self) -> None:
-        """Process the order queue"""
+        """Process the order queue with batch execution and liquidity-based priority"""
+        batched_orders = []
+
         while self.order_queue and self._check_rate_limit():
             order = self.order_queue.popleft()
+
+            # Prioritize orders based on liquidity impact
+            index = self.indices[order.index_id]
+            liquidity_info = self.liquidity_info.get(order.index_id, {})
+
+            liquidity_impact = sum(
+                (liquidity_info.get(asset.symbol, {}).get('price_impact', 0) * asset.current_price)
+                for asset in index.assets
+            )
+            batched_orders.append((liquidity_impact, order))
+
+        # Sort orders by lowest liquidity impact first
+        batched_orders.sort(key=lambda x: x[0])
+
+        # Process orders within rate limit (100 per 10 seconds)
+        for _, order in batched_orders[:self.rate_limit_orders]:  
             self._execute_order(order)
+
+        # Add remaining orders back to the queue (not executed in this cycle)
+        remaining_orders = [order for _, order in batched_orders[self.rate_limit_orders:]]
+        self.order_queue.extend(remaining_orders)
+
+
 
     def _execute_order(self, order: Order) -> None:
         """Simulate order execution"""
@@ -214,6 +250,7 @@ class TradingSimulator:
                 order.quantity * order.price - filled_value
             )
 
+    
     def rebalance(self, index_id: str, new_weights: Dict[str, float]) -> RebalanceReport:
         """Rebalance an index to new weights"""
         if index_id not in self.indices:
@@ -245,3 +282,4 @@ class TradingSimulator:
             total_cost=total_cost,
             timestamp=datetime.now()
         ) 
+    

@@ -1,143 +1,153 @@
-# Entry point for the system 
+from datetime import datetime
+from src.etf_trading import TradingSimulator
 import json
-from src.order_book import OrderBook
-from src.liquidity_manager import LiquidityManager
-import logging
-from typing import List, Dict
+import time
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+def load_test_scenarios():
+    with open('tests/test_data/scenarios.json', 'r') as f:
+        return json.load(f)
 
-class ETFTradingSystem:
-    def __init__(self):
-        self.order_book = OrderBook()
-        self.liquidity_manager = LiquidityManager()
-        self.orders_data = []
-        
-    def load_test_data(self, file_path: str = "data/fake_orders.json") -> None:
-        """Load test orders from JSON file"""
-        try:
-            with open(file_path, 'r') as f:
-                self.orders_data = json.load(f)
-            logger.info(f"Successfully loaded {len(self.orders_data)} orders from {file_path}")
-        except Exception as e:
-            logger.error(f"Error loading test data: {str(e)}")
-            raise
+def run_basic_scenario(simulator, scenario):
+    print("\n=== Running Basic Scenario ===")
+    
+    # Setup initial index
+    index_data = scenario['initial_index']
+    index_assets = [
+        (asset[0], asset[1], asset[2], asset[3])
+        for asset in index_data['assets']
+    ]
+    simulator.create_index(index_data['id'], index_assets)
+    print(f"Created index {index_data['id']} with assets: {index_assets}")
 
-    def test_order_submission(self) -> None:
-        """Test submitting various orders"""
-        logger.info("Testing order submission...")
+    # Execute timeline
+    for event in scenario['timeline']:
+        print(f"\nTimestamp {event.get('timestamp', 'N/A')}:")
         
-        for order in self.orders_data[:3]:  # Test first 3 orders
-            success = self.order_book.add_order(order)
-            logger.info(f"Order {order['positionId']} submission: {'Success' if success else 'Failed'}")
-            
-            # Check liquidity for the order
-            if order['action'] in ['buy', 'sell']:
-                fillable_quantity = self.liquidity_manager.check_liquidity(
-                    order['indexId'],
-                    order['quantity']
-                )
-                logger.info(f"Fillable quantity for order {order['positionId']}: {fillable_quantity}")
+        if 'action' in event:
+            if event['action'] == 'buy':
+                order = simulator.buy(**event['params'])
+                print(f"Buy order {order.position_id}: Status = {order.status.value}")
+            elif event['action'] == 'cancel':
+                result = simulator.cancel(**event['params'])
+                order = simulator.get_order(event['params']['position_id'])
+                print(f"Cancel order {event['params']['position_id']}: Status = {order.status.value}")
 
-    def test_large_order_handling(self) -> None:
-        """Test handling of large orders"""
-        logger.info("Testing large order handling...")
+def run_liquidity_scenario(simulator, scenario):
+    print("\n=== Running Liquidity Scenario ===")
+    
+    # Setup initial index with liquidity info
+    index_data = scenario['initial_index']
+    index_assets = [
+        (asset[0], asset[1], asset[2], asset[3])
+        for asset in index_data['assets']
+    ]
+    index = simulator.create_index(index_data['id'], index_assets)
+    
+    # Set liquidity constraints
+    simulator.set_liquidity_info(
+        index_data['id'],
+        index_data['liquidity_info']
+    )
+    print(f"Created index {index_data['id']} with liquidity constraints")
+
+    # Execute timeline
+    for event in scenario['timeline']:
+        print(f"\nTimestamp {event.get('timestamp', 'N/A')}:")
         
-        large_order = {
-            "timestamp": 1012,
-            "action": "buy",
-            "positionId": 100,
-            "indexId": 1,
-            "quantity": 100000,
-            "indexPrice": 1025.50
-        }
+        if 'asset_prices' in event:
+            simulator.update_prices(index_data['id'], event['asset_prices'])
+            print(f"Updated prices: {event['asset_prices']}")
         
-        # Check liquidity before submission
-        fillable_qty = self.liquidity_manager.check_liquidity(
-            large_order['indexId'],
-            large_order['quantity']
+        if 'action' in event:
+            if event['action'] == 'buy':
+                order = simulator.buy(**event['params'])
+                print(f"Buy order {order.position_id}: Status = {order.status.value}")
+                
+                # Process the order queue
+                simulator.process_queue()
+                
+                # Get fill report
+                if 'expected_fill_percentage' in event:
+                    fill_report = simulator.get_fill_report(event['params']['position_id'])
+                    print(f"Fill report: {fill_report.fill_percentage:.1f}% filled, Loss: ${fill_report.loss:.2f}")
+
+def run_rebalance_scenario(simulator, scenario):
+    print("\n=== Running Rebalance Scenario ===")
+    
+    # Setup initial index
+    index_data = scenario['initial_index']
+    index_assets = [
+        (asset[0], asset[1], asset[2], asset[3])
+        for asset in index_data['assets']
+    ]
+    simulator.create_index(index_data['id'], index_assets)
+    print(f"Created index {index_data['id']}")
+
+    # Execute timeline
+    for event in scenario['timeline']:
+        print(f"\nTimestamp {event.get('timestamp', 'N/A')}:")
+        
+        if 'asset_prices' in event:
+            simulator.update_prices(index_data['id'], event['asset_prices'])
+            index = simulator.get_index(index_data['id'])
+            print(f"Updated prices, new NAV: ${index.calculate_nav():.2f}")
+        
+        if 'action' in event and event['action'] == 'rebalance':
+            report = simulator.rebalance(**event['params'])
+            print(f"Rebalance cost: ${report.total_cost:.2f}")
+            print(f"New weights: {report.new_weights}")
+
+def run_batch_processing_scenario(simulator, scenario):
+    print("\n=== Running Batch Processing Scenario ===")
+    
+    # Setup indices
+    for index_data in scenario['indices']:
+        simulator.create_index(
+            index_data['id'],
+            [(asset, 1, 100, 100) for asset in index_data['assets']]
         )
-        logger.info(f"Large order fillable quantity: {fillable_qty}")
-        
-        # Apply slippage
-        adjusted_order = self.liquidity_manager.apply_slippage(large_order)
-        logger.info(f"Original price: {large_order['indexPrice']}")
-        logger.info(f"Adjusted price: {adjusted_order['executionPrice']}")
+        print(f"Created index {index_data['id']} with assets: {index_data['assets']}")
 
-    def test_order_cancellation(self) -> None:
-        """Test order cancellation functionality"""
-        logger.info("Testing order cancellation...")
+    # Execute timeline
+    for event in scenario['timeline']:
+        print(f"\nTimestamp {event.get('timestamp', 'N/A')}:")
         
-        # Add test order
-        test_order = {
-            "timestamp": 1013,
-            "action": "buy",
-            "positionId": 101,
-            "indexId": 1,
-            "quantity": 100,
-            "indexPrice": 1020.50
-        }
+        # Submit all orders
+        for order_data in event['orders']:
+            order = simulator.buy(
+                position_id=len(simulator.orders) + 1,
+                index_id=order_data['index_id'],
+                quantity=order_data['amount'] / order_data['price'],
+                index_price=order_data['price']
+            )
+            print(f"Submitted order for {order_data['index_id']}: ${order_data['amount']}")
         
-        # Add and then cancel the order
-        self.order_book.add_order(test_order)
-        logger.info(f"Orders for index 1 before cancellation: {len(self.order_book.get_orders(1))}")
+        # Process queue
+        print("\nProcessing order queue...")
+        simulator.process_queue()
         
-        success = self.order_book.cancel_order(101)
-        logger.info(f"Cancellation of order 101: {'Success' if success else 'Failed'}")
-        logger.info(f"Orders for index 1 after cancellation: {len(self.order_book.get_orders(1))}")
-
-    def test_rate_limits(self) -> None:
-        """Test handling of rate limits"""
-        logger.info("Testing rate limit handling...")
-        
-        # Create multiple orders with same timestamp
-        rate_limit_orders = [
-            {
-                "timestamp": 1014,
-                "action": "buy",
-                "positionId": i,
-                "indexId": 1,
-                "quantity": 100,
-                "indexPrice": 1020.50
-            } for i in range(102, 105)  # 3 orders
-        ]
-        
-        for order in rate_limit_orders:
-            self.order_book.add_order(order)
-            
-        # Get all orders for index 1 at timestamp 1014
-        orders = self.order_book.get_orders(1)
-        same_timestamp_orders = [o for o in orders if o['timestamp'] == 1014]
-        logger.info(f"Number of orders at timestamp 1014: {len(same_timestamp_orders)}")
-
-    def run_all_tests(self) -> None:
-        """Run all test scenarios"""
-        try:
-            self.load_test_data()
-            
-            # Run all test scenarios
-            self.test_order_submission()
-            self.test_large_order_handling()
-            self.test_order_cancellation()
-            self.test_rate_limits()
-            
-            logger.info("All tests completed successfully!")
-            
-        except Exception as e:
-            logger.error(f"Error during test execution: {str(e)}")
-            raise
+        # Show queue state
+        queued_indices = [order.index_id for order in simulator.order_queue]
+        print(f"Remaining in queue: {queued_indices}")
 
 def main():
-    # Create instance of trading system
-    trading_system = ETFTradingSystem()
+    # Initialize simulator
+    simulator = TradingSimulator()
     
-    # Run all tests
-    trading_system.run_all_tests()
+    # Load test scenarios
+    scenarios = load_test_scenarios()
+    
+    # Run different scenarios
+    run_basic_scenario(simulator, scenarios['basic_scenarios'][0])
+    
+    simulator = TradingSimulator()  # Reset simulator
+    run_liquidity_scenario(simulator, scenarios['liquidity_scenarios'][0])
+    
+    simulator = TradingSimulator()  # Reset simulator
+    run_rebalance_scenario(simulator, scenarios['rebalance_scenarios'][0])
+    
+    simulator = TradingSimulator()  # Reset simulator
+    run_batch_processing_scenario(simulator, scenarios['batch_processing_scenarios'][0])
 
 if __name__ == "__main__":
     main() 

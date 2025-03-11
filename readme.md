@@ -21,7 +21,7 @@ A Python-based ETF trading system that simulates the creation, management, and t
 │       └── simulator.py
 ├── tests/
 │   └── unit/
-│       └── __init__.py.py
+│       └── __init__.py
 │       └── test_order_scenarios.py
 ├── requirements.txt
 └── README.md
